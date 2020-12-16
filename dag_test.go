@@ -12,8 +12,8 @@ type V string
 func (v V) ID() string {
 	return string(v)
 }
-func (v V) Attrs() daggo.Attrs {
-	return daggo.Attrs(string(v))
+func (v V) Type() string {
+	return "test"
 }
 
 func TestDAG(t *testing.T) {
@@ -22,8 +22,8 @@ func TestDAG(t *testing.T) {
 
 		d := daggo.New()
 		assert.Equal(0, d.Len())
-		assert.True(d.GetVertice("a") == nil)
-		assert.Equal(daggo.Vertices{}, d.Vertices())
+		assert.True(d.GetVertice("test", "a") == nil)
+		assert.Equal(daggo.Vertices{}, d.Vertices(""))
 		assert.Equal(daggo.Vertices{}, d.StartingVertices())
 		assert.Equal(daggo.Vertices{}, d.EndingVertices())
 		assert.Equal(daggo.Vertices{}, d.ToVertices(nil))
@@ -35,14 +35,19 @@ func TestDAG(t *testing.T) {
 		assert.Nil(d.AddEdge(V("a"), V("b"), 0))
 
 		assert.Equal(2, d.Len())
-		assert.Equal("a", d.GetVertice("a").ID())
-		assert.Equal("b", d.GetVertice("b").ID())
-		assert.Equal(nil, d.GetVertice("c"))
+		assert.Equal("a", d.GetVertice("test", "a").ID())
+		assert.Equal("b", d.GetVertice("test", "b").ID())
+		assert.Equal(nil, d.GetVertice("test", "c"))
 		assert.Equal(daggo.Vertices{V("a")}, d.StartingVertices())
 		assert.Equal(daggo.Vertices{V("b")}, d.EndingVertices())
 		assert.Equal(daggo.Vertices{V("b")}, d.ToVertices(V("a")))
 		assert.Equal(daggo.Vertices{V("a")}, d.FromVertices(V("b")))
-		assert.Equal([]string{"a", "b"}, d.Vertices().Sort().IDs())
+		assert.Equal([]string{"a", "b"}, d.Vertices("").Sort().IDs())
+		assert.Equal([]string{"a", "b"}, d.Vertices("test").Sort().IDs())
+		assert.Equal([]string{}, d.Vertices("test1").Sort().IDs())
+		assert.Equal([]string{"b"}, d.Vertices("").Filter(func(v daggo.Vertice) bool {
+			return v.ID() == "b"
+		}).IDs())
 
 		assert.Nil(d.AddEdge(V("a"), V("c"), 0))
 		assert.Nil(d.AddEdge(V("x"), V("b"), 0))
@@ -240,12 +245,97 @@ func TestDAG(t *testing.T) {
 
 		ws := 0
 		attrs := d.CloseDAG(V("a"), V("e")).
-			Iterate(V("a"), nil, func(v daggo.Vertice, w int, acc []daggo.Attrs) []daggo.Attrs {
+			Iterate(V("a"), nil, func(v daggo.Vertice, w int, acc []interface{}) []interface{} {
 				ws += w
-				return append(acc, v.Attrs())
+				return append(acc, interface{}(v.ID()))
 			})
 
 		assert.Equal(10, ws)
-		assert.Equal([]daggo.Attrs{"a", "b", "d", "e", "a", "c", "d", "e", "a", "c", "e", "a", "d", "e", "a", "e"}, attrs)
+		assert.Equal([]interface{}{"a", "b", "d", "e", "a", "c", "d", "e", "a", "c", "e", "a", "d", "e", "a", "e"}, attrs)
+	})
+
+	t.Run("DAG.Merge", func(t *testing.T) {
+		assert := assert.New(t)
+
+		d := daggo.New()
+		assert.Nil(d.AddEdge(V("a"), V("b"), 1))
+		assert.Nil(d.AddEdge(V("a"), V("c"), 1))
+		assert.Nil(d.AddEdge(V("a"), V("d"), 1))
+		assert.Nil(d.AddEdge(V("a"), V("e"), 1))
+		assert.Nil(d.AddEdge(V("b"), V("d"), 1))
+
+		a := daggo.New()
+		assert.Nil(a.AddEdge(V("c"), V("d"), 1))
+		assert.Nil(a.AddEdge(V("c"), V("e"), 1))
+		assert.Nil(a.AddEdge(V("d"), V("e"), 1))
+		assert.Nil(a.AddEdge(V("x"), V("b"), 1))
+		assert.Nil(a.AddEdge(V("d"), V("y"), 1))
+		err := d.Merge(a)
+		assert.Nil(err)
+
+		ws := 0
+		attrs := d.CloseDAG(V("a"), V("e")).
+			Iterate(V("a"), nil, func(v daggo.Vertice, w int, acc []interface{}) []interface{} {
+				ws += w
+				return append(acc, interface{}(v.ID()))
+			})
+
+		assert.Equal(10, ws)
+		assert.Equal([]interface{}{"a", "b", "d", "e", "a", "c", "d", "e", "a", "c", "e", "a", "d", "e", "a", "e"}, attrs)
+
+		assert.Nil(a.AddEdge(V("e"), V("a"), 1))
+		err = d.Merge(a)
+		assert.NotNil(err)
+	})
+
+	t.Run("DAG.Clone", func(t *testing.T) {
+		assert := assert.New(t)
+
+		d := daggo.New()
+		assert.Nil(d.AddEdge(V("a"), V("b"), 1))
+		assert.Nil(d.AddEdge(V("a"), V("c"), 1))
+		assert.Nil(d.AddEdge(V("a"), V("d"), 1))
+		assert.Nil(d.AddEdge(V("a"), V("e"), 1))
+		assert.Nil(d.AddEdge(V("b"), V("d"), 1))
+		assert.Nil(d.AddEdge(V("c"), V("d"), 1))
+		assert.Nil(d.AddEdge(V("c"), V("e"), 1))
+		assert.Nil(d.AddEdge(V("d"), V("e"), 1))
+		assert.Nil(d.AddEdge(V("x"), V("b"), 1))
+		assert.Nil(d.AddEdge(V("d"), V("y"), 1))
+
+		a := d.Clone()
+		assert.True(d.Equal(a))
+
+		assert.Nil(a.AddEdge(V("d"), V("n"), 1))
+		assert.False(d.Equal(a))
+	})
+
+	t.Run("DAG.JSON", func(t *testing.T) {
+		assert := assert.New(t)
+
+		d := daggo.New()
+		assert.Nil(d.AddEdge(V("a"), V("b"), 1))
+		assert.Nil(d.AddEdge(V("a"), V("c"), 1))
+		assert.Nil(d.AddEdge(V("a"), V("d"), 1))
+		assert.Nil(d.AddEdge(V("a"), V("e"), 1))
+		assert.Nil(d.AddEdge(V("b"), V("d"), 1))
+		assert.Nil(d.AddEdge(V("c"), V("d"), 1))
+		assert.Nil(d.AddEdge(V("c"), V("e"), 1))
+		assert.Nil(d.AddEdge(V("d"), V("e"), 1))
+		assert.Nil(d.AddEdge(V("x"), V("b"), 1))
+		assert.Nil(d.AddEdge(V("d"), V("y"), 1))
+
+		j := d.JSON()
+		a := daggo.FromJSON(j)
+		assert.True(d.Equal(a))
+
+		j.Edges["none"] = make(map[string]int)
+		assert.Nil(daggo.FromJSON(j))
+
+		j = d.JSON()
+		v, ok := j.Edges["test:y"]
+		assert.True(ok)
+		v["test:a"] = 0
+		assert.Nil(daggo.FromJSON(j))
 	})
 }
