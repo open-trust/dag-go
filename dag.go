@@ -5,6 +5,9 @@ import (
 	"sort"
 )
 
+// Attrs is vertice' attributes.
+type Attrs interface{}
+
 // Vertice is a vertice formed DAG.
 type Vertice interface {
 	ID() string
@@ -25,52 +28,32 @@ func (s Vertices) Sort() Vertices {
 }
 
 // IDs returns a slice of vertices' IDs
-func (s Vertices) IDs() IDs {
-	res := make([]string, 0)
-	for _, v := range s {
-		res = append(res, v.ID())
+func (s Vertices) IDs() []string {
+	res := make([]string, len(s))
+	for i, v := range s {
+		res[i] = v.ID()
 	}
 	return res
 }
 
 // Attrs returns a slice of vertices' Attrs
-func (s Vertices) Attrs() Attrs {
-	res := make([]Attr, 0)
-	for _, v := range s {
-		res = append(res, v.Attrs()...)
+func (s Vertices) Attrs() []Attrs {
+	res := make([]Attrs, len(s))
+	for i, v := range s {
+		res[i] = v.Attrs()
 	}
 	return res
 }
 
-// Attr is a vertice' attribute that used in DAG iterator.
-type Attr interface {
-	ID() string
-}
-
-// Attrs is a slice of vertice' attributes.
-type Attrs []Attr
-
-func (s Attrs) Len() int           { return len(s) }
-func (s Attrs) Less(i, j int) bool { return s[i].ID() < s[j].ID() }
-func (s Attrs) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-
-// Sort returns a slice of vertice' attributes in increasing order by attr's ID.
-func (s Attrs) Sort() Attrs {
-	sort.Stable(s)
-	return s
-}
-
-// IDs ...
-type IDs sort.StringSlice
-
-func (s IDs) Len() int           { return len(s) }
-func (s IDs) Less(i, j int) bool { return s[i] < s[j] }
-func (s IDs) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-
-// Sort returns a slice of vertice' IDs in increasing order by ID.
-func (s IDs) Sort() IDs {
-	sort.Stable(s)
-	return s
+// Filter ...
+func (s Vertices) Filter(fn func(v Vertice) bool) Vertices {
+	res := make([]Vertice, 0, len(s)/2)
+	for _, v := range s {
+		if fn(v) {
+			res = append(res, v)
+		}
+	}
+	return res
 }
 
 // DAG is a directed acyclic graph.
@@ -168,24 +151,6 @@ func (d *DAG) FromVertices(v Vertice) Vertices {
 
 	for k := range b.prev {
 		res = append(res, d.blocks[k].vertice)
-	}
-	return res
-}
-
-// VerticeIDs returns all vertices IDs in the DAG.
-func (d *DAG) VerticeIDs() IDs {
-	res := make([]string, 0, len(d.blocks))
-	for k := range d.blocks {
-		res = append(res, k)
-	}
-	return res
-}
-
-// Attrs returns all vertices Attrs in the DAG.
-func (d *DAG) Attrs() Attrs {
-	res := make([]Attr, 0, len(d.blocks))
-	for _, b := range d.blocks {
-		res = append(res, b.vertice.Attrs()...)
 	}
 	return res
 }
@@ -399,26 +364,31 @@ func (d *DAG) Reverse() *DAG {
 }
 
 // Iterate iterate the DAG' vertices with the most reachability relation paths.
-func (d *DAG) Iterate(start Vertice, init Attrs, fn func(cur Vertice, weight int, acc Attrs) Attrs) Attrs {
-	res := make([]Attr, 0)
+func (d *DAG) Iterate(start Vertice, init []Attrs, fn func(cur Vertice, weight int, acc []Attrs) []Attrs) []Attrs {
+	res := make([]Attrs, 0)
 	b := d.blocks[start.ID()]
 	if b == nil {
 		return res
 	}
 
-	var iterator func(b *block, weight int, acc Attrs)
-	iterator = func(b *block, weight int, acc Attrs) {
+	var iterator func(b *block, weight int, acc []Attrs)
+	iterator = func(b *block, weight int, acc []Attrs) {
 		r := fn(b.vertice, weight, acc)
 		if len(b.next) == 0 {
 			res = append(res, r...)
 			return
 		}
-		for k, w := range b.next {
-			iterator(d.blocks[k], w, r[:])
+		keys := make([]string, 0, len(b.next))
+		for k := range b.next {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			iterator(d.blocks[k], b.next[k], r[:])
 		}
 	}
 	if init == nil {
-		init = make(Attrs, 0)
+		init = make([]Attrs, 0)
 	}
 	iterator(b, 0, init)
 	return res
